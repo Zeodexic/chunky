@@ -1,11 +1,17 @@
-﻿class Program{
+﻿using System.Text.RegularExpressions;
+
+class Program {
+    class Mode {
+        public const int Error = -1;
+        public const int Split = 1;
+        public const int Recombine = 2;
+    }
     static void Main(string[] args) {
         if (args.Length < 2) {
             Console.WriteLine("usage:\n" +
                 "required first argument is 1 to split files, or 2 to recombine files\n" +
                 "required second argument is a location (a file for mode 1, or a directory for mode 2). both paths must be RELATIVE to the executable.\n" +
-                "optional third argument determines the chunk size in split mode, in mb (default 20mb)\n" +
-                "and the file format to recombine to in recombine mode (default none)");
+                "optional third argument determines the chunk size in split mode, in mb (default 20mb)");
             return;
         }
 
@@ -15,7 +21,7 @@
         bool valid = false;
         int validMode = -1;
         switch (checkMode) {
-            case 1: {
+            case Mode.Split: {
                 if (File.Exists(inputPath)) {
                     valid = true;
                 }
@@ -41,10 +47,10 @@
         }
 
         switch (validMode) {
-            case -1: {
+            case Mode.Error: {
                 return;
             }
-            case 1: {
+            case Mode.Split: {
                 int chunkSize = 1024 * 1024 * 20;
                 string no = inputPath;
                 no.Replace(".", "");
@@ -56,12 +62,12 @@
                 SplitFile(inputPath, chunkSize, no + "_split");
                 break;
             }
-            case 2: {
+            case Mode.Recombine: {
                 string format = "";
                 if (args.Length == 3) {
                     format = args[2];
                 }
-                RecombineFile(inputPath, Directory.GetCurrentDirectory() + "\\" + "recombined", format);
+                RecombineFile(inputPath, Directory.GetCurrentDirectory() + "\\" + "recombined");
                 break;
             }
         }
@@ -70,10 +76,17 @@
     public static void SplitFile(string inputFile, int chunkSize, string path) {
         const int BUFFER_SIZE = 20 * 1024;
         byte[] buffer = new byte[BUFFER_SIZE]; //20kb
-
+        int index = 0;
         using (Stream input = File.OpenRead(inputFile)) {
-            int index = 0;
+            
             while (input.Position < input.Length) {
+                if (index == 0) {
+                    string ext = Regex.Replace(Path.GetExtension(inputFile), @"\r\n?|\n", String.Empty);
+                    string[] asArray = {
+                        ext
+                    };
+                    File.WriteAllLines(path + "\\format", asArray);
+                }
                 string fileName = index.ToString();
                 int initialLength = fileName.Length;
                 for (int i = 0; i < 10 - initialLength; i++) {
@@ -90,21 +103,30 @@
                 index++;
             }
         }
+        Console.WriteLine("Created " + (index) + " chunks");
     }
-    public static void RecombineFile(string inputDirectory, string output, string format) {
+    public static void RecombineFile(string inputDirectory, string output) {
         string[] inputFilePaths = Directory.GetFiles(inputDirectory);
-        Console.WriteLine("Number of files: {0}.", inputFilePaths.Length);
-        if (format != string.Empty) {
-            output += ".";
+        Console.WriteLine("Found {0} chunks", inputFilePaths.Length - 1);
+        string formatPath = inputDirectory + "\\format";
+        if (File.Exists(formatPath)) {
+            string format = Regex.Replace(File.ReadAllText(formatPath), @"\r\n?|\n\r?", string.Empty);
             output += format;
+            inputFilePaths = inputFilePaths.Take(inputFilePaths.Count() - 1).ToArray(); //dont process in the format
+            Console.WriteLine("Format is " + format);
+        }
+        else {
+            Console.WriteLine("Format detection failed");
         }
         using (var outputStream = File.Create(output)) {
             foreach (var inputFilePath in inputFilePaths) {
+                if (inputFilePath.Equals("format")) continue;
                 using (var inputStream = File.OpenRead(inputFilePath)) {
                     inputStream.CopyTo(outputStream);
                 }
-                Console.WriteLine("The file {0} has been processed.", inputFilePath);
+                Console.WriteLine("Chunk {0} has been processed", inputFilePath);
             }
+            Console.WriteLine("File {0} was created", output);
         }
     }
 }
